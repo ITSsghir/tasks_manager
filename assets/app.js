@@ -72,10 +72,37 @@
   async function hashPassword(password, saltB64) {
     const enc = new TextEncoder();
     const salt = saltB64 ? fromBase64(saltB64) : crypto.getRandomValues(new Uint8Array(16));
-    const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']);
-    const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', iterations: 250000, salt }, keyMaterial, 256);
-    const hash = new Uint8Array(bits);
-    return { saltB64: toBase64(salt), hashB64: toBase64(hash) };
+    try {
+      if (!crypto?.subtle) throw new Error('subtle-not-available');
+      const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']);
+      const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', iterations: 250000, salt }, keyMaterial, 256);
+      const hash = new Uint8Array(bits);
+      return { saltB64: toBase64(salt), hashB64: toBase64(hash) };
+    } catch (_) {
+      // Insecure fallback for non-secure contexts (e.g., file://). For dev/demo only.
+      const data = enc.encode(password);
+      const mixed = new Uint8Array(salt.length + data.length);
+      mixed.set(salt, 0); mixed.set(data, salt.length);
+      let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+      for (let r = 0; r < 100000; r++) {
+        for (let i = 0; i < mixed.length; i++) {
+          h1 = Math.imul(h1 ^ mixed[i], 2654435761);
+          h2 = Math.imul(h2 ^ mixed[i], 1597334677);
+        }
+        h1 = (h1 << 13) | (h1 >>> 19);
+        h2 = (h2 << 11) | (h2 >>> 21);
+      }
+      const out = new Uint8Array(32);
+      const words = [h1, h2, h1 ^ h2, (h1 * 31) ^ (h2 * 17), ~h1, ~h2, (h1 >>> 1) ^ (h2 << 1), (h1 << 1) ^ (h2 >>> 1)];
+      for (let i = 0; i < 8; i++) {
+        const w = words[i] >>> 0;
+        out[i * 4 + 0] = (w >>> 24) & 0xff;
+        out[i * 4 + 1] = (w >>> 16) & 0xff;
+        out[i * 4 + 2] = (w >>> 8) & 0xff;
+        out[i * 4 + 3] = w & 0xff;
+      }
+      return { saltB64: toBase64(salt), hashB64: toBase64(out) };
+    }
   }
 
   async function createAccount(email, password, displayName) {
@@ -472,9 +499,15 @@
     dom.userBadge.textContent = label;
   }
 
+  function showAppRoot() { if (dom.appRoot) { dom.appRoot.hidden = false; dom.appRoot.style.display = ''; } }
+  function hideAppRoot() { if (dom.appRoot) { dom.appRoot.hidden = true; dom.appRoot.style.display = 'none'; } }
+  function showAuthView() { if (dom.authView) { dom.authView.hidden = false; dom.authView.style.display = 'grid'; } }
+  function hideAuthView() { if (dom.authView) { dom.authView.hidden = true; dom.authView.style.display = 'none'; } }
+
   function onSignedIn(isNew) {
-    dom.authView.hidden = true;
-    dom.appRoot.hidden = false;
+    // Ensure visibility toggling is robust across environments
+    hideAuthView();
+    showAppRoot();
     if (isNew) {
       state = { tasks: [], projects: [], tags: [] };
       saveState();
@@ -487,13 +520,13 @@
   function onSignOut() {
     setSession(null);
     currentUser = null;
-    dom.appRoot.hidden = true;
-    dom.authView.hidden = false;
+    hideAppRoot();
+    showAuthView();
   }
 
   function registerServiceWorker() {
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch(console.error);
+      navigator.serviceWorker.register('./sw.js').catch(console.error);
     }
   }
 
@@ -506,17 +539,17 @@
     const found = accounts.find(a => a.id === session.userId);
     if (found) {
       currentUser = { id: found.id, email: found.email, displayName: found.displayName };
-      dom.appRoot.hidden = false;
-      dom.authView.hidden = true;
+      showAppRoot();
+      hideAuthView();
       loadState();
       refreshUI();
     } else {
-      dom.appRoot.hidden = true;
-      dom.authView.hidden = false;
+      hideAppRoot();
+      showAuthView();
     }
   } else {
-    dom.appRoot.hidden = true;
-    dom.authView.hidden = false;
+    hideAppRoot();
+    showAuthView();
   }
   registerServiceWorker();
 })();
