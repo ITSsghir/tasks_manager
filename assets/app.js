@@ -27,20 +27,83 @@
     dialogTitle: document.getElementById('dialogTitle'),
     deleteTaskBtn: document.getElementById('deleteTaskBtn'),
     cancelDialogBtn: document.getElementById('cancelDialogBtn'),
-    projectsDataList: document.getElementById('projectsDataList')
+    projectsDataList: document.getElementById('projectsDataList'),
+    userBadge: document.getElementById('userBadge'),
+    logoutBtn: document.getElementById('logoutBtn'),
+    appRoot: document.getElementById('appRoot'),
+    authView: document.getElementById('authView'),
+    authTabLogin: document.getElementById('authTabLogin'),
+    authTabSignup: document.getElementById('authTabSignup'),
+    authPanelLogin: document.getElementById('authPanelLogin'),
+    authPanelSignup: document.getElementById('authPanelSignup'),
+    loginForm: document.getElementById('loginForm'),
+    signupForm: document.getElementById('signupForm')
   };
 
   const STORAGE_KEY = 'tasks.app.v1';
+  const ACCOUNTS_KEY = 'tasks.accounts.v1';
+  const SESSION_KEY = 'tasks.session.v1';
   const THEME_KEY = 'tasks.theme.v1';
 
   /** @type {{ tasks: any[]; projects: string[]; tags: string[] }} */
   let state = { tasks: [], projects: [], tags: [] };
+  /** @type {{ id: string; email: string; displayName: string } | null } */
+  let currentUser = null;
 
   const generateId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
+  function toBase64(bytes) { return btoa(String.fromCharCode(...bytes)); }
+  function fromBase64(b64) { return Uint8Array.from(atob(b64), c => c.charCodeAt(0)); }
+
+  function loadAccounts() {
+    try { return JSON.parse(localStorage.getItem(ACCOUNTS_KEY) || '[]'); } catch { return []; }
+  }
+  function saveAccounts(accounts) {
+    localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(accounts));
+  }
+  function getSession() {
+    try { return JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); } catch { return null; }
+  }
+  function setSession(user) {
+    if (user) localStorage.setItem(SESSION_KEY, JSON.stringify({ userId: user.id }));
+    else localStorage.removeItem(SESSION_KEY);
+  }
+
+  async function hashPassword(password, saltB64) {
+    const enc = new TextEncoder();
+    const salt = saltB64 ? fromBase64(saltB64) : crypto.getRandomValues(new Uint8Array(16));
+    const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']);
+    const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', iterations: 250000, salt }, keyMaterial, 256);
+    const hash = new Uint8Array(bits);
+    return { saltB64: toBase64(salt), hashB64: toBase64(hash) };
+  }
+
+  async function createAccount(email, password, displayName) {
+    const accounts = loadAccounts();
+    const exists = accounts.some(a => a.email.toLowerCase() === email.toLowerCase());
+    if (exists) throw new Error('Un compte existe déjà avec cet email.');
+    const { saltB64, hashB64 } = await hashPassword(password);
+    const user = { id: generateId(), email, displayName, passwordHash: hashB64, passwordSalt: saltB64, createdAt: Date.now() };
+    accounts.push(user);
+    saveAccounts(accounts);
+    return { id: user.id, email: user.email, displayName: user.displayName };
+  }
+
+  async function signIn(email, password) {
+    const accounts = loadAccounts();
+    const user = accounts.find(a => a.email.toLowerCase() === email.toLowerCase());
+    if (!user) throw new Error('Identifiants invalides.');
+    const { hashB64 } = await hashPassword(password, user.passwordSalt);
+    if (hashB64 !== user.passwordHash) throw new Error('Identifiants invalides.');
+    return { id: user.id, email: user.email, displayName: user.displayName };
+  }
+
+  function getStorageKeyForUser(userId) { return `${STORAGE_KEY}::${userId}`; }
+
   function loadState() {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!currentUser) return;
+      const raw = localStorage.getItem(getStorageKeyForUser(currentUser.id));
       if (raw) {
         state = JSON.parse(raw);
       } else {
@@ -62,7 +125,8 @@
   }
 
   function saveState() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    if (!currentUser) return;
+    localStorage.setItem(getStorageKeyForUser(currentUser.id), JSON.stringify(state));
     refreshUI();
   }
 
@@ -191,6 +255,7 @@
     } else {
       renderBoardView();
     }
+    updateUserBadge();
   }
 
   function upsertProject(name) {
@@ -355,6 +420,75 @@
 
     // Theme toggle
     dom.themeToggle.addEventListener('click', () => setTheme(false));
+
+    // Auth tabs
+    dom.authTabLogin?.addEventListener('click', () => switchAuthTab('login'));
+    dom.authTabSignup?.addEventListener('click', () => switchAuthTab('signup'));
+
+    // Auth forms
+    dom.loginForm?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = dom.loginForm.elements['email'].value.trim();
+      const password = dom.loginForm.elements['password'].value;
+      try {
+        currentUser = await signIn(email, password);
+        setSession(currentUser);
+        onSignedIn();
+      } catch (err) { alert(err.message || String(err)); }
+    });
+
+    dom.signupForm?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const displayName = dom.signupForm.elements['displayName'].value.trim();
+      const email = dom.signupForm.elements['email'].value.trim();
+      const password = dom.signupForm.elements['password'].value;
+      const password2 = dom.signupForm.elements['password2'].value;
+      if (password.length < 8) { alert('Mot de passe trop court (min 8).'); return; }
+      if (password !== password2) { alert('Les mots de passe ne correspondent pas.'); return; }
+      try {
+        currentUser = await createAccount(email, password, displayName);
+        setSession(currentUser);
+        onSignedIn(true);
+      } catch (err) { alert(err.message || String(err)); }
+    });
+
+    dom.logoutBtn?.addEventListener('click', () => onSignOut());
+  }
+
+  function switchAuthTab(which) {
+    const loginActive = which === 'login';
+    dom.authTabLogin.classList.toggle('active', loginActive);
+    dom.authTabLogin.setAttribute('aria-selected', String(loginActive));
+    dom.authTabSignup.classList.toggle('active', !loginActive);
+    dom.authTabSignup.setAttribute('aria-selected', String(!loginActive));
+    dom.authPanelLogin.classList.toggle('active', loginActive);
+    dom.authPanelSignup.classList.toggle('active', !loginActive);
+  }
+
+  function updateUserBadge() {
+    if (!dom.userBadge) return;
+    if (!currentUser) { dom.userBadge.textContent = ''; return; }
+    const label = currentUser.displayName || currentUser.email;
+    dom.userBadge.textContent = label;
+  }
+
+  function onSignedIn(isNew) {
+    dom.authView.hidden = true;
+    dom.appRoot.hidden = false;
+    if (isNew) {
+      state = { tasks: [], projects: [], tags: [] };
+      saveState();
+    } else {
+      loadState();
+    }
+    refreshUI();
+  }
+
+  function onSignOut() {
+    setSession(null);
+    currentUser = null;
+    dom.appRoot.hidden = true;
+    dom.authView.hidden = false;
   }
 
   function registerServiceWorker() {
@@ -365,9 +499,25 @@
 
   // Init
   setTheme(true);
-  loadState();
   setupEvents();
-  refreshUI();
+  const session = getSession();
+  if (session) {
+    const accounts = loadAccounts();
+    const found = accounts.find(a => a.id === session.userId);
+    if (found) {
+      currentUser = { id: found.id, email: found.email, displayName: found.displayName };
+      dom.appRoot.hidden = false;
+      dom.authView.hidden = true;
+      loadState();
+      refreshUI();
+    } else {
+      dom.appRoot.hidden = true;
+      dom.authView.hidden = false;
+    }
+  } else {
+    dom.appRoot.hidden = true;
+    dom.authView.hidden = false;
+  }
   registerServiceWorker();
 })();
 
