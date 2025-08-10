@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="fr" data-theme="auto">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tasks — Gestion élégante</title>
+    <meta name="description" content="Application élégante de gestion des tâches avec vues Liste et Tableau, thème doux, et persistance locale." />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'%3E%3Crect rx='24' width='128' height='128' fill='%2388a2e6'/%3E%3Cpath d='M32 68l16 16 48-48' fill='none' stroke='%23fff' stroke-width='12' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="assets/styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="brand">
+        <span class="logo" aria-hidden="true">✓</span>
+        <h1 class="title">Tasks</h1>
+      </div>
+
+      <div class="header-actions">
+        <div class="search">
+          <input id="searchInput" type="search" placeholder="Rechercher (/)" aria-label="Rechercher" />
+        </div>
+        <button id="themeToggle" class="ghost" title="Thème clair/sombre">🌓</button>
+        <button id="newTaskBtn" class="primary">Nouvelle tâche (N)</button>
+      </div>
+    </header>
+
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Filtres et collections">
+        <section class="panel">
+          <h2>Projets</h2>
+          <div class="project-add">
+            <input id="projectInput" type="text" placeholder="Nouveau projet" />
+            <button id="addProjectBtn" class="ghost">Ajouter</button>
+          </div>
+          <ul id="projectsList" class="chips"></ul>
+        </section>
+
+        <section class="panel">
+          <h2>Étiquettes</h2>
+          <div class="tag-add">
+            <input id="tagInput" type="text" placeholder="Nouvelle étiquette" />
+            <button id="addTagBtn" class="ghost">Ajouter</button>
+          </div>
+          <ul id="tagsList" class="chips"></ul>
+        </section>
+
+        <section class="panel">
+          <h2>Filtres</h2>
+          <div class="filters">
+            <label>
+              Statut
+              <select id="statusFilter">
+                <option value="">Tous</option>
+                <option value="todo">À faire</option>
+                <option value="in_progress">En cours</option>
+                <option value="done">Terminée</option>
+              </select>
+            </label>
+            <label>
+              Priorité
+              <select id="priorityFilter">
+                <option value="">Toutes</option>
+                <option value="low">Basse</option>
+                <option value="medium">Moyenne</option>
+                <option value="high">Haute</option>
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Données</h2>
+          <div class="data-actions">
+            <button id="exportBtn" class="secondary" title="Exporter (E)">Exporter</button>
+            <label class="import-label">
+              Importer (I)
+              <input id="importInput" type="file" accept="application/json" hidden />
+            </label>
+          </div>
+        </section>
+      </aside>
+
+      <main class="content" aria-live="polite">
+        <nav class="tabs" role="tablist">
+          <button id="tabList" role="tab" aria-selected="true" class="active">Liste</button>
+          <button id="tabBoard" role="tab">Tableau</button>
+        </nav>
+
+        <section id="viewList" role="tabpanel" class="view active">
+          <div id="listContainer" class="task-list"></div>
+        </section>
+
+        <section id="viewBoard" role="tabpanel" class="view">
+          <div class="board">
+            <div class="column" data-status="todo">
+              <h3>À faire</h3>
+              <div class="dropzone" data-status="todo"></div>
+            </div>
+            <div class="column" data-status="in_progress">
+              <h3>En cours</h3>
+              <div class="dropzone" data-status="in_progress"></div>
+            </div>
+            <div class="column" data-status="done">
+              <h3>Terminée</h3>
+              <div class="dropzone" data-status="done"></div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="taskDialog">
+      <form id="taskForm" method="dialog">
+        <header class="dialog-header">
+          <h3 id="dialogTitle">Nouvelle tâche</h3>
+        </header>
+        <div class="dialog-body">
+          <div class="grid">
+            <label>
+              Titre
+              <input id="taskTitle" name="title" required maxlength="200" placeholder="Ex: Finaliser le rapport" />
+            </label>
+            <label>
+              Description
+              <textarea id="taskDescription" name="description" rows="4" placeholder="Détails..."></textarea>
+            </label>
+            <div class="row">
+              <label>
+                Échéance
+                <input id="taskDueDate" name="dueDate" type="date" />
+              </label>
+              <label>
+                Priorité
+                <select id="taskPriority" name="priority">
+                  <option value="low">Basse</option>
+                  <option value="medium" selected>Moyenne</option>
+                  <option value="high">Haute</option>
+                </select>
+              </label>
+              <label>
+                Statut
+                <select id="taskStatus" name="status">
+                  <option value="todo">À faire</option>
+                  <option value="in_progress">En cours</option>
+                  <option value="done">Terminée</option>
+                </select>
+              </label>
+            </div>
+            <div class="row">
+              <label>
+                Projet
+                <input id="taskProject" name="project" list="projectsDataList" placeholder="Ex: Marketing" />
+                <datalist id="projectsDataList"></datalist>
+              </label>
+              <label>
+                Étiquettes (séparées par des virgules)
+                <input id="taskTags" name="tags" placeholder="ex: urgent, client" />
+              </label>
+            </div>
+          </div>
+        </div>
+        <footer class="dialog-footer">
+          <div class="left">
+            <button id="deleteTaskBtn" type="button" class="danger" hidden>Supprimer</button>
+          </div>
+          <div class="right">
+            <button type="button" class="ghost" id="cancelDialogBtn">Annuler</button>
+            <button type="submit" class="primary">Enregistrer</button>
+          </div>
+        </footer>
+        <input type="hidden" id="taskId" name="id" />
+      </form>
+    </dialog>
+
+    <template id="taskItemTemplate">
+      <article class="task-card" draggable="true">
+        <header class="task-header">
+          <span class="priority-dot" title="Priorité"></span>
+          <h4 class="task-title"></h4>
+        </header>
+        <p class="task-desc"></p>
+        <div class="task-meta"></div>
+        <footer class="task-actions">
+          <button class="ghost edit">Modifier</button>
+          <button class="ghost complete">Terminer</button>
+        </footer>
+      </article>
+    </template>
+
+    <script src="assets/app.js" defer></script>
+  </body>
+  </html>
+
